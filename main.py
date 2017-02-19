@@ -5,6 +5,7 @@ from os import path
 import logging.handlers
 from influxdb import InfluxDBClient
 from influxdb import SeriesHelper
+from serial.serialutil import CR, LF
 from configparser import ConfigParser
 import sys
 
@@ -70,10 +71,13 @@ class MySeriesHelper(SeriesHelper):
         # autocommit must be set to True when using bulk_size
         autocommit = True
 
+# class Myrs485 (rs485):
+#     def readline:
+#
 
 try:
-    ser = rs485.RS485(config['comport']['name'], config['comport']['boudrate'], timeout=0.5)
-    ser.rs485_mode = rs485.RS485Settings(rts_level_for_tx=True, rts_level_for_rx=False)
+    ser = rs485.RS485(config['comport']['name'], config['comport']['boudrate'], timeout=0.3)
+    ser.rs485_mode = rs485.RS485Settings()
     # sio = io.TextIOWrapper(io.BufferedRWPair(ser, ser, 1),newline='\r')
 
     while True:
@@ -82,8 +86,7 @@ try:
             toport = '>%dG\r' % (i,)
             ser.write(toport.encode('ascii'))
             log.debug(toport)
-            # time.sleep(0.35)
-            comm_data = inbytes = ser.readline()
+            comm_data = inbytes = ser.read_until(terminator=CR, size=6)
             if inbytes:
                 try:
                     inbytes = inbytes.decode("ascii")
@@ -104,6 +107,7 @@ try:
         except Exception as msg:
             log.error('Coul`d not connect to influxdb')
             log.error(msg)
+        ser.flushInput()
         time.sleep(poll_interval)
 
 except Exception as msg:
