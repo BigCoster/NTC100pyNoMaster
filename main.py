@@ -1,13 +1,14 @@
 import time
-import io
+# import io
 from serial import rs485
 from os import path
 import logging.handlers
 from influxdb import InfluxDBClient
 from influxdb import SeriesHelper
-from serial.serialutil import CR, LF
+from serial.serialutil import CR
 from configparser import ConfigParser
 import sys
+from list_serial_ports import serial_ports
 
 # conf logging
 levels = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING, 'ERROR': logging.ERROR}
@@ -30,9 +31,9 @@ config = ConfigParser()
 config['influxdb'] = {'host': 'localhost', 'port': '8086', 'user': 'root',
                       'pass': 'root', 'db': 'mydb', 'retention_days': '30'}
 config['comport'] = {'name': 'COM1', 'boudrate': '57600'}
-config['logging'] = {'level': 'INFO', '; available levels' : ','.join(levels.keys())}
-config['rs485'] = {'number_devices': '5', 'polling_interval': '5', '; polling intrval in seconds': '1',
-                   'first_device': '1', '; first_device - start address': '1'}
+config['logging'] = {'level': 'INFO', '; available levels': ', '.join(levels.keys())}
+config['rs485'] = {'number_devices': '5', 'polling_interval': '5', '; polling intrval in seconds, def value': '1',
+                   'first_device': '1', '; first device it`s start address, def value': '1'}
 
 if not path.exists('config.ini'):
     log.warning('No config! It will be created with def values...')
@@ -42,7 +43,6 @@ else:
     config.read('config.ini')
 log.info('Logging level: ' + config['logging']['level'])
 log.setLevel(config['logging']['level'])
-
 
 myclient = InfluxDBClient(config['influxdb']['host'], config['influxdb']['port'],
                           config['influxdb']['user'], config['influxdb']['pass'],
@@ -54,6 +54,7 @@ first_dev = int(config['rs485']['first_device'])
 num_dev = int(config['rs485']['number_devices'])
 poll_interval = int(config['rs485']['polling_interval'])
 
+
 class MySeriesHelper(SeriesHelper):
     # Meta class stores time series helper configuration.
     class Meta:
@@ -63,7 +64,7 @@ class MySeriesHelper(SeriesHelper):
         # series_name = 'events.stats.{server_name}'
         series_name = 'NTC100'
         # Defines all the fields in this time series.
-        fields = ['curr_temp']
+        fields = ['curr_temp', 'time_resp']
         # Defines all the tags for the series.
         tags = ['dev_addr']
         # Defines the number of data points to store prior to writing on the wire.
@@ -71,12 +72,9 @@ class MySeriesHelper(SeriesHelper):
         # autocommit must be set to True when using bulk_size
         autocommit = True
 
-# class Myrs485 (rs485):
-#     def readline:
-#
 
 try:
-    ser = rs485.RS485(config['comport']['name'], config['comport']['boudrate'], timeout=0.3)
+    ser = rs485.RS485(config['comport']['name'], config['comport']['boudrate'], timeout=0.5)
     ser.rs485_mode = rs485.RS485Settings()
     # sio = io.TextIOWrapper(io.BufferedRWPair(ser, ser, 1),newline='\r')
 
@@ -84,24 +82,28 @@ try:
         i = first_dev
         while i < (first_dev + num_dev):
             toport = '>%dG\r' % (i,)
+            send_t = time.time()
             ser.write(toport.encode('ascii'))
             log.debug(toport)
             comm_data = inbytes = ser.read_until(terminator=CR, size=6)
+            get_t = time.time() - send_t
             if inbytes:
                 try:
                     inbytes = inbytes.decode("ascii")
                     if not (inbytes[:5] in msges):
-                        log.debug(inbytes.strip())
+                        log.debug(inbytes.strip() + ' ' + str(int(get_t * 1000)) + 'ms')
                         inbytes = inbytes.strip()
                         inbytes = inbytes.strip('<')
                         inbytes = inbytes.split(':')
-                        MySeriesHelper(dev_addr=inbytes[0], curr_temp=int(inbytes[1]))
+                        MySeriesHelper(dev_addr=inbytes[0], curr_temp=int(inbytes[1]), time_resp=int(get_t * 1000 / 5))
                     else:
                         log.info(inbytes.strip())
                 except Exception as msg:
                     log.warning('Corrupted ascii -> ' + repr(comm_data))
                     log.warning(msg)
-            i = i + 1
+            else:
+                log.debug('TIMEOUT ' + str(int(get_t * 1000)) + 'ms')
+            i += i
         try:
             MySeriesHelper.commit()
         except Exception as msg:
@@ -113,5 +115,6 @@ try:
 except Exception as msg:
     log.error('Can`t open ' + config['comport']['name'])
     log.error(msg)
+    log.error('Available ports: %s.', ', '.join(serial_ports()))
 
 sys.exit()
