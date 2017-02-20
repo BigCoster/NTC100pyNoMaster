@@ -76,8 +76,6 @@ class MySeriesHelper(SeriesHelper):
 try:
     ser = rs485.RS485(config['comport']['name'], config['comport']['boudrate'], timeout=0.5)
     ser.rs485_mode = rs485.RS485Settings()
-    # sio = io.TextIOWrapper(io.BufferedRWPair(ser, ser, 1),newline='\r')
-
     while True:
         i = first_dev
         while i < (first_dev + num_dev):
@@ -103,7 +101,7 @@ try:
                     log.warning(msg)
             else:
                 log.debug('TIMEOUT ' + str(int(get_t * 1000)) + 'ms')
-            i += i
+            i = i + 1
         try:
             MySeriesHelper.commit()
         except Exception as msg:
